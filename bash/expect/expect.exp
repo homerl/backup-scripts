@@ -1,0 +1,32 @@
+#!/usr/bin/expect -f
+set ipaddr [lindex $argv 0]
+set timeout 500
+spawn ssh -q -o StrictHostKeyChecking=no root@$ipaddr
+
+expect {
+     "no)? " {
+        send -- "yes\r"
+        exp_continue
+     }
+     "password: " {
+         send -- "PASSW0RD\r"
+         expect "password"
+         send -- "calvin\r"
+         exp_continue
+         expect "password"
+         send -- "changeme\r"
+         exp_continue
+     }
+     "$ " {
+        send "help\r"
+   }
+}
+
+for {set i 1} {$i < 17} {incr i 1} {
+  expect {
+  "$ " {send "racadm clrsel -m server-$i\r";}
+ }
+}
+
+expect "$ "
+send "exit\r"

@@ -1,0 +1,25 @@
+#!/bin/bash
+id nagios
+if [ $? -eq 0 ]
+then
+  usermod -g 415 -u 414 nagios
+else
+  groupadd -g 415 nagios
+  useradd -g 415 -s /sbin/nologin -u 414 nagios
+fi
+delval="/opt/MegaRAID/MegaCli/MegaCli64"
+sed -i "\,$delval,d"  /etc/sudoers
+echo "nagios          ALL=(ALL)       NOPASSWD: /usr/sbin/cli,/root/bin/cli64,/sbin/mdadm,/opt/MegaRAID/MegaCli/MegaCli64,/usr/sbin/hpacucli,/usr/local/nagios/libexec/chkraid_nagios,/usr/local/nagios/libexec/check_dminfo,/sbin/ethtool" >> /etc/sudoers
+sed -r -i 's/Defaults( *)requiretty/#&/' /etc/sudoers
+if [ -d /opt/MegaRAID/MegaCli ]
+then
+        chmod 755 -R /opt/MegaRAID/MegaCli
+fi
+chkconfig --add nrpe
+chkconfig --level 35 nrpe on
+chown -R nagios.nagios /usr/local/nagios
+/etc/init.d/nrpe start
+if [ $? -eq 0 ]
+then
+ touch /tmp/nrpe-is-ok
+fi

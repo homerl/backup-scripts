@@ -1,0 +1,410 @@
+#! /bin/bash
+###########################################################################
+# Script:       chkraid_nagios
+# Author:       Homer Li
+# Modify:       Homer Li
+# Email:        liyan2@genomics.org.cn
+# Usage:        $0 [options]
+# Discription:  Check current raid status
+
+###########################################################################
+set -e
+# ID Settings for Nagios Service State
+nagiosStateOK=0
+nagiosStateWarning=1
+nagiosStateCritical=2
+nagiosStateUnknown=3
+# Settings for Powerleader 3015 or Powerleader 4016
+NumberOfDisk[0]=8
+#DiskMembers[0]="(1,2,3,4,5,6,7,8)"
+ArrayActivityStatus[0]=Idle
+ArrayFunctionalStatus[0]=Online
+
+NumberOfDisk[1]=7
+#DiskMembers[1]="(1,2,3,4,5,6,7)"
+ArrayActivityStatus[1]=Idle
+ArrayFunctionalStatus[1]=Online
+
+#4016
+NumberOfDisk1[0]=8
+ArrayActivityStatus1[0]=Idle
+ArrayFunctionalStatus1[0]=Online
+
+NumberOfDisk1[1]=8
+ArrayActivityStatus1[1]=Idle
+ArrayFunctionalStatus1[1]=Online
+
+# Settings for SUN x4500
+State[0]="clean"
+ActiveDevices[0]=22
+WorkingDevices[0]=23
+FailedDevices[0]=0
+SpareDevices[0]=1
+
+State[1]="clean"
+ActiveDevices[1]=22
+WorkingDevices[1]=23
+FailedDevices[1]=0
+SpareDevices[1]=1 
+
+#Dell PR410+MD1000
+ActiveDevices[2]=16
+DegradedDevices[2]=0
+FailedDevices[2]=0
+SpareDevices[2]=1 
+
+#HP 380G5+MSA70
+ActiveDevices[3]=31
+DegradedDevices[3]=0
+FailedDevices[3]=0
+SpareDevices[3]=1
+
+# Global settings
+CLI="/usr/bin/sudo /usr/sbin/cli"
+CLI4024="/usr/bin/sudo /root/bin/cli64"
+MDADM="/usr/bin/sudo /sbin/mdadm"
+MegaCLI="/usr/bin/sudo /opt/MegaRAID/MegaCli/MegaCli64"
+HPacucli="/usr/bin/sudo /usr/sbin/hpacucli"
+VERBOSE=0
+
+ckraidpromise()
+{
+
+        $CLI logdrv -v -i $1 | grep "No array with ID 0 in controller" 
+        if [ $? -eq 0 ]
+          then
+            echo "No array with ID in controller"
+            exit 0
+        fi
+ 
+        $CLI logdrv -v -i $1|awk '\
+        BEGIN {\
+                FS=":";\
+                COUNT=0;\
+        }
+        {\
+                if(\
+                        (/Array activity status/ && \
+                                $2 == '"\" ${ArrayActivityStatus[$1]}\""') || \
+                        (/Array functional status/ && \
+                                $2 == '"\" ${ArrayFunctionalStatus[$1]}\""') \
+                ) { LINES[COUNT]=$0; COUNT++; }\
+        } 
+        END {\
+                if( '${VERBOSE}' == 1 ) {\
+                        for (i=0; i < COUNT; i++) {print LINES[i]}\
+                }\
+                if( COUNT == "2" ) {\
+                        printf "Raid '$1' status is [Normal]\n";\
+                        exit '${nagiosStateOK}';\
+                } else {\
+                        printf "Raid '$1' status is [critical]\n";\
+                        exit '${nagiosStateCritical}';\
+                }
+        }'
+}
+
+ckraidpromise4016()
+{
+
+  $CLI logdrv -v -i $1 | grep "No array with ID 0 in controller"
+        if [ $? -eq 0 ]
+          then
+            echo "No array with ID in controller"
+            exit 0
+        fi
+
+        $CLI logdrv -v -i $1|awk '\
+        BEGIN {\
+                FS=":";\
+                COUNT=0;\
+        }
+        {\
+                if(\
+                        (/Number of disks/ && \
+                                $2 == '"\" ${NumberOfDisk1[$1]}\""') || \
+                        (/Array activity status/ && \
+                                $2 == '"\" ${ArrayActivityStatus1[$1]}\""') || \
+                        (/Array functional status/ && \
+                                $2 == '"\" ${ArrayFunctionalStatus1[$1]}\""') \
+                ) { LINES[COUNT]=$0; COUNT++; }\
+        } 
+        END {\
+                if( '${VERBOSE}' == 1 ) {\
+                        for (i=0; i < COUNT; i++) {print LINES[i]}\
+                }\
+                if( COUNT == "2" ) {\
+                        printf "Raid '$1' status is [Normal]\n";\
+                        exit '${nagiosStateOK}';\
+                } else {\
+                        printf "Raid '$i' status is [critical]\n";\
+                        exit '${nagiosStateCritical}';\
+                }
+        }'
+}
+
+
+chkraidell()
+{
+    if [[ ! -x /opt/MegaRAID/MegaCli/MegaCli64 || ! -f /etc/blc-raid ]]
+    then
+	/usr/bin/sudo chmod 755 /opt/MegaRAID/MegaCli/MegaCli64
+	if [ $? -eq 0 ]
+	then
+		echo "Has change the permission"
+	else
+        	echo "can't find MegaCli command"
+        	exit 1
+	fi
+    fi
+    nagiosStateOK=0
+    nagiosStateWarning=1
+    nagiosStateCritical=2
+    nagiosStateUnknown=3
+
+$MegaCLI -AdpAllInfo -aAll | awk 'BEGIN{COUNT=0;}\
+{\
+        if (($0~/Degraded/ && $3==0)\
+        || ($0~/Critical Disks/ && $4==0)\
+        || ($0~/Failed Disks/ && $4==0)\
+        || ($0~/Offline/ && $3==0))\
+       {\
+        COUNT++
+        raidlog[COUNT]=$0
+       }\
+}
+END {\
+    if( '${VERBOSE}' == 1 ) {\
+    for (i=0; i <= COUNT; i++) \
+        {\
+            print raidlog[i]
+        }\
+}\
+    if (COUNT==4) {\
+        print "Raid is no problem"
+        exit '${nagiosStateOK}';\
+    }
+    else {\
+        print "Raid is Critical";exit 2
+        exit '${nagiosStateCritical}';\
+    }
+   }'
+}
+
+chkraidhp()
+{
+nagiosStateOK=0
+nagiosStateWarning=1
+nagiosStateCritical=2
+nagiosStateUnknown=3
+
+  if [ ! -x /usr/sbin/hpacucli ]
+      then
+         echo "can't find hpacucli command"
+         exit 1
+    fi
+  $HPacucli ctrl all show config detail | grep -A 7 "Logical Drive:" | awk -F'[,: ]+' '$0~/Status/{print $3}'| while read line 
+   do 
+      
+      if [ "$VERBOSE" == 1 ]
+        then
+          echo $line
+      fi
+      if [ "$line" == Recovering ]
+        then
+                echo "logic raid volumn rebuilding"
+                exit 1;
+		break;
+      elif [ "$line" != OK ]
+        then
+              echo "logic raid volumn failed"
+              exit 2;
+	      break;
+      fi
+   done
+ 
+  $HPacucli ctrl all show config detail |  egrep -v "port 1I:box|port 2I:box" |grep -A 5  physicaldrive | awk -F'[: ]+' '$0~/Status/{print $3}' | while read line
+    do
+      
+        if [ "$VERBOSE" == 1 ]
+          then
+            echo $line
+        fi
+       if [ "$line" == Rebuilding ]
+        then
+                echo "raid status is rebuilding"
+                exit 1;
+		break;
+        elif [ "$line" != OK ]
+         then
+                echo "raid disk failed"
+                exit 2;
+		break;
+		
+        fi
+     done
+	echo "raid disk is ok"
+}
+
+ckraid4024()
+{
+        ${CLI4024} vsf info |\
+                egrep -v "(# Name|==========|GuiErrMsg<0x00>: Success)"|\
+                awk '\
+                BEGIN {count=0; ncount=0;}\
+                {\
+                        vol[$1]=$0;\
+                        count++;\
+                        if ($NF == "Normal") {\
+                                ncount++;
+                        }\
+                }\
+                END {\
+                        if ( '${VERBOSE}' == 1 ) {\
+                                for (i=1; i <= count; i++) {print vol[i];}\
+                        }\
+                        if ( count == ncount ) {\
+                                printf "Raid status is [Normal]\n";\
+                                exit '${nagiosStateOK}';\
+                        } else {\
+                                printf "Raid status is [critical]\n";\
+                                exit '${nagiosStateCritical}';\
+                        }\
+                }'
+
+}
+
+ckraidswraid()
+{
+        $MDADM -D /dev/md${1} |awk '\
+        BEGIN {\
+                FS=":";\
+                COUNT=0;\
+        }\
+        {\
+                if(\
+                        (/State/ && \
+                                $2 == '"\" ${State[$1]}\""') || \
+                        (/Active Devices/ && \
+                                $2 == '"\" ${ActiveDevices[$1]}\""') || \
+                        (/Working Devices/ && \
+                                $2 == '"\" ${WorkingDevices[$1]}\""') || \
+                        (/Failed Devices/ && \
+                                $2 == '"\" ${FailedDevices[$1]}\""') || \
+                        (/Spare Devices/ && \
+                                $2 == '"\" ${SpareDevices[$1]}\""') \
+                ) { LINES[COUNT]=$0; COUNT++; }\
+        }\
+        END {\
+                if ( '${VERBOSE}' == 1 ) {\
+                        for (i=0; i < COUNT; i++) {print LINES[i]}\
+                }\
+                if ( COUNT == "5" ) {\
+                        printf "Raid '$1' status is [Normal]\n";\
+                        exit '${nagiosStateOK}';\
+                } else {\
+                        printf "Raid '$i' status is [critical]\n";\
+                        exit '${nagiosStateCritical}';\
+                }\
+        }'
+}
+
+checksoftraid()
+{
+	if [ -d /proc/mdadm ]
+	then
+	cat /proc/mdstat | awk -F '[][ //]+' '\
+		BEGIN {\
+                COUNT=0;\
+	        }\
+        	{\
+			if ($0~/U/)
+			{\
+			LINES[COUNT]=$0
+			COUNT++
+			}
+		}
+			END{\
+			for (j=0;j<=COUNT;j++) 
+			{\
+					if (LINES[j]~/_/)
+					{\
+						printf "SoftRaid status is [critical]\n";\
+						exit '${nagiosStateCritical}';\
+					}
+                        }
+			printf "SoftRaid status is [ok]\n";
+        		}'
+	else
+		echo "Not found softraid volume"
+		exit 1
+	fi
+}
+
+chksoftraid()
+{
+	checksoftraid;
+}
+
+ckraid4016()
+{
+        ckraidpromise4016 0;
+        ckraidpromise4016 1;
+}
+ckmd1000()
+{
+        ckraidmd1000;
+}
+ckraid3015()
+{
+        ckraidpromise 0;
+}
+ckdl380()
+{
+    ckraid380
+}
+ckdefault()
+{
+    echo "Nrpe could not found the Raid controller."
+    exit 1;
+}
+
+if [ -e /etc/blc-raid ]
+then
+	BLCRAID=$(cat /etc/blc-raid)
+else
+	$(which sudo) $(which dmidecode) | awk '/Vendor/ {print $2}' > /etc/blc-raid
+	if [ $? -eq 0 ]
+	then
+		BLCRAID=$(cat /etc/blc-raid)
+	else
+		echo "Could not find dmidecode command, please install"
+	fi
+fi
+
+if [ -z $BLCRAID ]
+then
+	echo "Please reset /etc/blc-raid file, dmidecode could not find vendor name."
+	exit 1
+fi
+
+case "${BLCRAID}" in
+        powerleader3015 )
+                ckraid3015;;
+        powerleader4024 )
+                ckraid4024;;
+        powerleader4016 )
+                ckraid4016;;
+       Dell )
+                chkraidell;;
+       IBM )
+                chkraidell;;
+       HP )
+                chkraidhp;;
+       softraid )
+		chksoftraid;;
+       American )
+                chksoftraid;;
+	*)
+		ckdefault;;	
+esac
