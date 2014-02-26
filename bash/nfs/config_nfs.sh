@@ -40,7 +40,7 @@ do
 		mkdir -p $mountpoint
 	fi
 	
-	echo "$mountpoint 10.1.1.0(rw,async,no_root_squash) 10.11.1.2(ro,async,no_root_squash) 10.1.1.10(ro,async,no_root_squash) 10.0.0.0/255.0.0.0(rw,async)" >> $exports
+	echo "$mountpoint 10.10.10.0(rw,async,no_root_squash) 10.10.10.1(ro,async,no_root_squash) 10.10.10.10(ro,async,no_root_squash) 10.0.0.0/255.0.0.0(rw,async)" >> $exports
 	check_err $?
 
 	#rewrite to fstab	
